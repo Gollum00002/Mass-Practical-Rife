@@ -61,6 +61,8 @@ paste inside without quotes
 }
 "
 #FOR FISH DO:
+Make a backup of ~/.config/fish/config.fish
+
 nano ~/.config/fish/config.fish
 
 Paste Inside Replace everything (Without the quotes):
@@ -99,6 +101,7 @@ set -x PATH $HOME/.local/bin $PATH
 source ~/.config/fish/config.fish
 
 #FOR BASH DO:
+Make a backup of ~/.bashrc
 
 nano ~/.bashrc
 
