@@ -1,5 +1,7 @@
 # Mass-Practical-Rife (MPR)
 
+> ⚠️ **Linux Only** — MPR is built for Linux. Before proceeding, follow the included **`Linux Install Instructions.txt`** to set up your environment.
+
 This project started out of frustration with low-framerate video being everywhere online — 24fps, 30fps, sometimes as low as 5fps. MPR fixes that. It uses **Practical-RIFE 4.26** and **FFmpeg** to interpolate entire directories of videos to a target framerate in one go, with zero user interaction required between files.
 
 This is the first program I ever developed, originally built back in 2024. Over the years it has been steadily improved to the point where I'm confident putting it in front of everyone.
@@ -58,6 +60,10 @@ This is the first program I ever developed, originally built back in 2024. Over 
 
 ## 🚀 Usage
 
+### Prerequisites
+
+Follow **`Linux Install Instructions.txt`** included in this repository before doing anything else. It covers setting up Distrobox, CUDA, Vulkan, PyTorch, and all required dependencies. The instructions are written for **Fish shell** — a Bash version is also included if you prefer it.
+
 ### Configuration
 
 Open `Launch.sh` and set the following parameters before running:
@@ -74,22 +80,23 @@ Open `Launch.sh` and set the following parameters before running:
 
 CD into MPR Folder
 
-**Bash:**
-```bash
-./Launch.sh
-```
-
-**Fish shell:**
+**Fish shell (recommended):**
 ```fish
 bash Launch.sh
 ```
 
 > Note: Fish does not run shell scripts directly, so `bash` must be called explicitly.
 
+**Bash:**
+```bash
+./Launch.sh
+```
+
 ---
 
 ## 📋 Requirements
 
+- Linux
 - Python 3.x
 - FFmpeg (must be in `PATH`)
 - NVIDIA GPU with CUDA (recommended) or CPU fallback
