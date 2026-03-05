@@ -72,12 +72,20 @@ Open `launch.sh` and set the following parameters before running:
 
 ### Running
 
-Cd into MPR Folder
+CD into MPR Folder
 
+**Bash:**
 ```bash
-./launch.sh
+./Launch.sh
 ```
-For fish use 'bash Launch.sh'
+
+**Fish shell:**
+```fish
+bash Launch.sh
+```
+
+> Note: Fish does not run shell scripts directly, so `bash` must be called explicitly.
+
 ---
 
 ## 📋 Requirements
