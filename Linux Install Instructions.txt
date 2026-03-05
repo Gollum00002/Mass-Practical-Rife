@@ -60,7 +60,7 @@ paste inside without quotes
     }
 }
 "
-
+#FOR FISH DO:
 nano ~/.config/fish/config.fish
 
 Paste Inside Replace everything (Without the quotes):
@@ -68,13 +68,6 @@ Paste Inside Replace everything (Without the quotes):
 """""
 # ~/.config/fish/config.fish
 # A smart config that works on the host and in containers.
-
-# --- Host-specific Settings ---
-# Only run these commands if we are NOT inside a container
-if not test -d "/run/host"
-    source /usr/share/cachyos-fish-config/cachyos-config.fish
-end
-
 
 # --- Container-specific Settings ---
 # Only run these commands if we ARE inside a container.
@@ -104,6 +97,42 @@ set -x PATH $HOME/.local/bin $PATH
 """""
 
 source ~/.config/fish/config.fish
+
+#FOR BASH DO:
+
+nano ~/.bashrc
+
+Paste Inside Replace everything (Without the quotes):
+
+"""""
+# ~/.bashrc
+# A smart config that works on the host and in containers.
+
+# --- Container-specific Settings ---
+# Only run these commands if we ARE inside a container.
+if [ -d "/run/host" ]; then
+    # Make the host's NVIDIA Vulkan driver available inside the container.
+    export VK_ICD_FILENAMES=/run/host/etc/vulkan/icd.d/nvidia_icd.x86_64.json
+fi
+
+# --- Universal Settings ---
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# Aliases
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# CUDA 12.8 Environment Variables
+export PATH=/usr/local/cuda-12.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:${LD_LIBRARY_PATH}
+export PATH=$HOME/.local/bin:$PATH
+"""""
+
+source ~/.bashrc
 
 ####Verify Cuda Install and vulkan install
 
