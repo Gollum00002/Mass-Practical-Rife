@@ -100,7 +100,7 @@ alias grep='grep --color=auto'
 # UPDATED PATHS FOR 12.8
 set -x PATH /usr/local/cuda-12.8/bin $PATH
 set -x LD_LIBRARY_PATH /usr/local/cuda-12.8/lib64 $LD_LIBRARY_PATH
-set -x PATH /home/gollum/.local/bin $PATH
+set -x PATH $HOME/.local/bin $PATH
 """""
 
 source ~/.config/fish/config.fish
