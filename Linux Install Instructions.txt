@@ -12,6 +12,8 @@ NOTE: These instructions are for fedora:41 so if you want it for other images pl
 
 #Then enter the distro box
 
+E.g., distrobox enter FedForWork <-- (This is the name of the container)
+
 #Use the following commands:
 
 sudo dnf install gcc-13
