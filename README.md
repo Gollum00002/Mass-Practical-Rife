@@ -72,10 +72,12 @@ Open `launch.sh` and set the following parameters before running:
 
 ### Running
 
+Cd into MPR Folder
+
 ```bash
 ./launch.sh
 ```
-
+For fish use 'bash Launch.sh'
 ---
 
 ## 📋 Requirements
