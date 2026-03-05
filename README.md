@@ -60,7 +60,7 @@ This is the first program I ever developed, originally built back in 2024. Over 
 
 ### Configuration
 
-Open `launch.sh` and set the following parameters before running:
+Open `Launch.sh` and set the following parameters before running:
 
 | Parameter | Description |
 |---|---|
