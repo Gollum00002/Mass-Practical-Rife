@@ -1,0 +1,123 @@
+# RIFE Video Processing Installation Instructions
+# Install Distrobox and docker, you may even install distroshelf (Optional, unrelated to program) for container management
+
+#Create Distrobox
+
+Command may look like:
+
+distrobox create --image fedora:41 --name "Insert name for container here without quotes" --nvidia
+
+NOTE: These instructions are for fedora:41 so if you want it for other images please adapt as required 
+      or ask an AI to change the instructions according to your image.
+
+#Then enter the distro box
+
+#Use the following commands:
+
+sudo dnf install gcc-13
+sudo dnf install g++-13
+
+sudo ln -s /etc/alternatives/gcc /usr/bin/gcc
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 50
+sudo update-alternatives --set gcc /usr/bin/gcc-13
+
+sudo ln -s /etc/alternatives/g++ /usr/bin/g++
+sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 50
+sudo update-alternatives --set g++ /usr/bin/g++-13
+
+#Verify Detected gcc/g++
+
+gcc --version
+g++ --version
+
+#Install Cuda 12.8 (You may install higher Cuda Versions but in that case you will need 
+                    to modify instructions and the enhanced-inference-video-linux.py file, adapt or ask AI [Preferebly Claude])
+
+wget https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_570.86.10_linux.run
+sudo sh cuda_12.8.0_570.86.10_linux.run (#Location May Vary, Usually in HOME if you used the command above without cding into a directory)
+
+#NOTE DO NOT INSTALL DRIVER, MOST DISTRIBUTIONS HAVE DRIVER PREINSTALLED, 
+      CONFIRM IF YOU HAVE NVIDIA DRIVER PREINSTALLED
+
+sudo dnf install nano
+sudo dnf install vulkan-tools
+
+#### Use the following Commands
+
+sudo mkdir -p /etc/vulkan/icd.d/
+
+sudo nano /etc/vulkan/icd.d/nvidia_icd.x86_64.json
+
+paste inside without quotes
+"
+{
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": "libGLX_nvidia.so.0",
+        "api_version": "1.3.275"
+    }
+}
+"
+
+nano ~/.config/fish/config.fish
+
+Paste Inside Replace everything (Without the quotes):
+
+"""""
+# ~/.config/fish/config.fish
+# A smart config that works on the host and in containers.
+
+# --- Host-specific Settings ---
+# Only run these commands if we are NOT inside a container
+if not test -d "/run/host"
+    source /usr/share/cachyos-fish-config/cachyos-config.fish
+end
+
+
+# --- Container-specific Settings ---
+# Only run these commands if we ARE inside a container.
+if test -d "/run/host"
+    # Make the host's NVIDIA Vulkan driver available inside the container.
+    set -x VK_ICD_FILENAMES /run/host/etc/vulkan/icd.d/nvidia_icd.x86_64.json
+end
+
+
+# --- Universal Settings ---
+# These will run everywhere (host and container).
+
+# If not running interactively, don't do anything
+if not status is-interactive
+    exit
+end
+
+# Aliases
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# CUDA 12.8 Environment Variables
+# UPDATED PATHS FOR 12.8
+set -x PATH /usr/local/cuda-12.8/bin $PATH
+set -x LD_LIBRARY_PATH /usr/local/cuda-12.8/lib64 $LD_LIBRARY_PATH
+set -x PATH /home/gollum/.local/bin $PATH
+"""""
+
+source ~/.config/fish/config.fish
+
+####Verify Cuda Install and vulkan install
+
+vulkaninfo | grep deviceName
+nvcc --version
+
+####Then Install Pytorch 12.8 cuda any version for linux:
+
+sudo dnf install pip
+
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+####Install Requirements:
+
+sudo dnf install ffmpeg
+
+sudo dnf group install multimedia
+
+pip install opencv-python numpy tqdm scikit-video psutil

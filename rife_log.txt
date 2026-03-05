@@ -1,0 +1,15 @@
+2025-09-15 21:12:26,783 - INFO - CUDA detected: NVIDIA GeForce RTX 2070 SUPER
+2025-09-15 21:12:26,783 - INFO - RIFE Video Processing
+Input: /run/media/system/Tera/Process/zRIFE/Practical-RIFE-main
+Output: fpsConv
+Target FPS: 120
+2025-09-15 21:12:26,786 - INFO - Found 7 video files to process
+2025-09-15 21:12:26,931 - INFO - 
+Processing video: /run/media/system/Tera/Process/zRIFE/Practical-RIFE-main/testmat/azDerpixon-Eri-Chans_Home_Workout.mp4
+2025-09-15 21:12:26,931 - INFO -   Original: 1440x1080 @ 24.00 FPS -> Processing at: 960x720
+2025-09-15 21:12:28,027 - INFO - Using h264_nvenc hardware encoder.
+2025-09-15 21:17:20,034 - ERROR - Failed to process /run/media/system/Tera/Process/zRIFE/Practical-RIFE-main/testmat/azDerpixon-Eri-Chans_Home_Workout.mp4: flush of closed file
+2025-09-15 21:17:20,169 - INFO - 
+Processing video: /run/media/system/Tera/Process/zRIFE/Practical-RIFE-main/testmat/GeneralButch_2022-03_Marie_Rose_x_Doods_Puppy.mp4
+2025-09-15 21:17:20,169 - INFO -   Original: 1296x2304 @ 60.00 FPS -> Processing at: 404x720
+2025-09-15 21:17:20,359 - INFO - Using h264_nvenc hardware encoder.
