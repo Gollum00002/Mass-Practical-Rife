@@ -1,4 +1,4 @@
-# RIFE Video Processing Installation Instructions
+# Mass Practical Rife Installation Instructions
 # Install Distrobox and docker, you may even install distroshelf (Optional, unrelated to program) for container management
 
 #Create Distrobox
