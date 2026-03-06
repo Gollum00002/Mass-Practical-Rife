@@ -421,6 +421,7 @@ def check_for_keypress():
         except Exception:
             pass
 
+@torch.inference_mode()
 def process_frame(model, I0, I1, ratio, scale, h, w, original_h, original_w, device, fp16):
     try:
         # Validate input tensors
@@ -570,7 +571,7 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         tqdm.write(f"  Processing at: {new_w}x{new_h}", file=sys.stdout)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        torch.set_grad_enabled(False)
+        # inference_mode decorator on process_frame replaces set_grad_enabled
         if torch.cuda.is_available():
             torch.backends.cudnn.enabled = True
             torch.backends.cudnn.benchmark = True
@@ -630,10 +631,13 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         write_buffer = Queue(maxsize=MAX_BUFFER_SIZE)
         frame_cache = {0: lastframe}
 
-        padding_tmp = max(256, int(256/scale))
+        # RIFE HD requires 32-pixel alignment; 64 gives a safe margin and
+        # is much smaller than the original 256, reducing tensor size.
+        padding_tmp = max(64, int(64/scale))
         ph = ((h-1)//padding_tmp+1)*padding_tmp
         pw = ((w-1)//padding_tmp+1)*padding_tmp
         padding = (0, pw-w, 0, ph-h)
+        tqdm.write(f'  [pad] Processing tensor: {pw}x{ph} (frame: {w}x{h})', file=sys.stdout)
 
         def process_batch_sync(batch_mappings, frame_cache):
             results = []
