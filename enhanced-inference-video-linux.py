@@ -549,7 +549,14 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
             tqdm.write(f"Invalid FPS {original_fps}, skipping", file=sys.stdout)
             return False
 
-        if abs(original_fps - target_fps) < 0.5:
+        if original_fps >= target_fps - 0.5:
+            tqdm.write(f"\nSkipping (matching FPS): {video_path}", file=sys.stdout)
+            tqdm.write(f"  -> Copying to output folder: {output_filepath}", file=sys.stdout)
+            try:
+                shutil.copy2(video_path, output_filepath)
+                tqdm.write(f"  -> Copied successfully.", file=sys.stdout)
+            except Exception as copy_err:
+                tqdm.write(f"  -> Copy failed: {copy_err}", file=sys.stdout)
             return None
 
         actual_frame_count = get_actual_frame_count(inp)
