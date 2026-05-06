@@ -11,6 +11,6 @@ activate venv using:
 use the following:
     pip install -r requirements.txt
 
-then install ffmpeg through package manager or terminal.
+then install ffmpeg through package manager or terminal or installer.
 
-you can now start the program with Launch.sh
+you can now start the program with Launch.sh or Launch.bat
