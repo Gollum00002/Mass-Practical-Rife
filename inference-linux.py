@@ -792,8 +792,11 @@ def find_all_videos(root_dir, output_dir):
     video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
     video_files = []
     abs_out = os.path.abspath(output_dir)
-    for d, _, files in os.walk(root_dir):
+    for d, dirs, files in os.walk(root_dir):
         if os.path.abspath(d).startswith(abs_out): continue
+        # Skip Python virtual environment directories (identified by pyvenv.cfg)
+        dirs[:] = [sub for sub in dirs
+                   if not os.path.exists(os.path.join(d, sub, 'pyvenv.cfg'))]
         for f in files:
             if os.path.splitext(f)[1].lower() in video_extensions:
                 video_files.append(os.path.join(d, f))

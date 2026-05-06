@@ -1,0 +1,14 @@
+# RIFE Video Interpolation - Python Requirements
+#
+# PyTorch with CUDA 12.8 support.
+# CUDA 13 on the host is backwards compatible with this build.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch
+torchvision
+
+# Core dependencies
+opencv-python
+numpy
+tqdm
+scikit-video
+psutil

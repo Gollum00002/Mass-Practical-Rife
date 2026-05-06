@@ -1,0 +1,16 @@
+cd into directory
+
+create python virtual environment with
+
+    python -m venv venv
+
+activate venv using:
+
+    source venv/bin/activate.fish or source venv/bin/activate.csh or source venv/bin/activate.ps1 (whichever is for you)
+
+use the following:
+    pip install -r requirements.txt
+
+then install ffmpeg through package manager or terminal.
+
+you can now start the program with Launch.sh

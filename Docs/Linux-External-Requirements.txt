@@ -1,0 +1,4 @@
+ffmpeg
+
+through e.g. sudo dnf install ffmpeg or sudo pacman -S ffmpeg etc
+you can also install through your package manager
