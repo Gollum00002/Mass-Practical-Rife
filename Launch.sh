@@ -9,7 +9,7 @@ DISTROBOX_NAME="FedForWork"
 # This script automatically determines the correct paths.
 # It finds the directory where this script itself is located.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-PYTHON_SCRIPT_NAME="enhanced-inference-video-linux.py"
+PYTHON_SCRIPT_NAME="inference-linux.py"
 SCRIPT_PATH="$SCRIPT_DIR/$PYTHON_SCRIPT_NAME"
 
 # Check if the main Python script exists
