@@ -1,3 +1,5 @@
+Clone this repository https://github.com/Gollum00002/Mass-Practical-Rife.git
+
 cd into directory
 
 create python virtual environment with
@@ -8,9 +10,14 @@ activate venv using:
 
     source venv/bin/activate.fish or source venv/bin/activate.csh or source venv/bin/activate.ps1 (whichever is for you)
 
+for WINDOWS just paste the path of venv --> scripts --> activate.bat into the terminal and enter
+
+
 use the following:
     pip install -r requirements.txt
 
 then install ffmpeg through package manager or terminal or installer.
 
 you can now start the program with Launch.sh or Launch.bat
+
+if you cannot use Launch.sh make sure you have permission to execute the file
