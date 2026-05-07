@@ -18,13 +18,14 @@ import math
 import re
 import subprocess
 import psutil
-import signal
 import sys
+import stat
+import signal
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-# --- FIX: Global variable to track the current FFmpeg subprocess ---
+# --- Global variable to track the current FFmpeg subprocess ---
 g_current_subprocess = None
 
 # Global variables for process management
@@ -32,15 +33,37 @@ current_output_file = None
 processing_interrupted = False
 exit_program = False
 temp_dir = None
-MAX_BUFFER_SIZE = 20  # Reduced from 500 to limit memory usage
-CACHE_LIMIT = 100     # Maximum number of frames to keep in cache
+MAX_BUFFER_SIZE = 20
+CACHE_LIMIT = 100
 
 
+def remove_readonly(func, path, excinfo):
+    """Helper to remove read-only attributes on Windows/Wine before deletion."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
+
+def cleanup_processes():
+    """Aggressively locate and terminate any lingering FFmpeg processes."""
+    global g_current_subprocess
+    if g_current_subprocess is not None and g_current_subprocess.poll() is None:
+        try:
+            g_current_subprocess.terminate()
+            g_current_subprocess.wait(timeout=2)
+        except Exception:
+            try:
+                g_current_subprocess.kill()
+                g_current_subprocess.wait(timeout=2)
+            except Exception:
+                pass
+        g_current_subprocess = None
 
 def get_project_temp_dir():
     """
     Creates and returns the path to a temporary directory for processing.
-    This version creates the temp folder in the current directory to avoid tmpfs space issues.
+    Creates the temp folder in the current directory to avoid tmpfs space issues.
     """
     global temp_dir
     if temp_dir is None:
@@ -51,19 +74,39 @@ def get_project_temp_dir():
     return temp_dir
 
 def ensure_temp_dir_cleaned():
+    """Safely cleans up the temporary directory with retries."""
     global temp_dir
     if temp_dir is not None and os.path.isdir(temp_dir):
-        try:
-            shutil.rmtree(temp_dir)
-            temp_dir = None
-        except Exception as e:
-            tqdm.write(f"Warning: Could not clean temp directory: {e}", file=sys.stdout)
+        # 1. Ensure no FFmpeg subprocess is still holding a file lock
+        cleanup_processes()
+        
+        # 2. Try up to 5 times (giving OS time to release file locks)
+        for attempt in range(5):
+            try:
+                shutil.rmtree(temp_dir, onerror=remove_readonly)
+                temp_dir = None
+                return
+            except Exception as e:
+                if attempt < 4:
+                    time.sleep(1.0)
+                else:
+                    tqdm.write(f"\nWarning: Could not fully clean temp directory: {e}", file=sys.stdout)
+
+def handle_interrupt(sig, frame):
+    """Catches Ctrl+C to ensure graceful shutdown instead of an immediate crash."""
+    global exit_program, processing_interrupted
+    print("\n\nInterrupt detected (Ctrl+C). Initiating safe shutdown...", flush=True)
+    exit_program = True
+    processing_interrupted = True
+    cleanup_processes()
 
 def check_ffmpeg_installed():
     """Check if FFmpeg is installed and accessible"""
     try:
-        result = subprocess.run(['ffmpeg', '-version'],
-                              capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ['ffmpeg', '-version'],
+            capture_output=True, text=True, timeout=10
+        )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
@@ -72,20 +115,21 @@ def check_system_requirements():
     """Check if all system requirements are met"""
     issues =[]
 
-    # Check FFmpeg
     if not check_ffmpeg_installed():
-        issues.append("FFmpeg is not installed or not in PATH")
+        issues.append(
+            "FFmpeg is not installed or not in PATH.\n"
+            "  Download from https://ffmpeg.org/download.html, extract to C:\\ffmpeg,\n"
+            "  then add C:\\ffmpeg\\bin to your PATH environment variable."
+        )
 
-    # Check CUDA availability
     cuda_available = torch.cuda.is_available()
     if cuda_available:
         print(f"CUDA detected: {torch.cuda.get_device_name(0)}")
     else:
         print("CUDA not available, using CPU (will be much slower)")
 
-    # Check available memory
     mem = psutil.virtual_memory()
-    if mem.available < 4 * 1024**3:  # Less than 4GB
+    if mem.available < 4 * 1024**3:
         issues.append(f"Low available memory: {mem.available / 1024**3:.1f}GB (recommend at least 4GB)")
 
     if issues:
@@ -96,16 +140,15 @@ def check_system_requirements():
     return True
 
 def find_ffmpeg_path():
-    """Find FFmpeg executable path"""
+    """Find FFmpeg executable path — checks common Windows install locations first."""
     common_paths =[
-        '/usr/bin/ffmpeg',
-        '/usr/local/bin/ffmpeg',
-        '/opt/homebrew/bin/ffmpeg',  # macOS with Homebrew
-        shutil.which('ffmpeg')
+        r'C:\ffmpeg\bin\ffmpeg.exe',
+        r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+        r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe',
+        shutil.which('ffmpeg'),
     ]
-
     for path in common_paths:
-        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+        if path and os.path.isfile(path):
             return path
     return 'ffmpeg'  # Fallback to system PATH
 
@@ -130,7 +173,7 @@ def transcode_to_mp4(src_path):
 
 def get_video_info(video_path):
     ffmpeg_path = find_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace('ffmpeg', 'ffprobe')
+    ffprobe_path = ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe')
 
     info = {
         'width': 0,
@@ -175,7 +218,6 @@ def get_video_info(video_path):
                 elif key == 'duration':
                     info['duration'] = float(value) if value and value != 'N/A' else 0
 
-        # Fallback to OpenCV if FFprobe data is incomplete
         if info['fps'] > 1000 or info['fps'] == 0:
             cap = cv2.VideoCapture(video_path)
             if cap.isOpened():
@@ -188,7 +230,6 @@ def get_video_info(video_path):
                     info['total_frames'] = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 cap.release()
 
-        # Calculate missing values
         if info['total_frames'] == 0 and info['duration'] > 0 and info['fps'] > 0:
             info['total_frames'] = int(info['duration'] * info['fps'])
         if info['duration'] == 0 and info['total_frames'] > 0 and info['fps'] > 0:
@@ -199,7 +240,6 @@ def get_video_info(video_path):
 
     except Exception as e:
         print(f"Error getting video info: {e}")
-        # Fallback to OpenCV
         try:
             cap = cv2.VideoCapture(video_path)
             if cap.isOpened():
@@ -265,12 +305,11 @@ def transferAudio(sourceVideo, targetVideo):
         tmp_dir = get_project_temp_dir()
         audio_dir = os.path.join(tmp_dir, f"audio_{os.getpid()}_{int(time.time())}")
         os.makedirs(audio_dir, exist_ok=True)
-        a_mkv = os.path.join(audio_dir, "audio.mkv")
 
-        ffprobe_path = ffmpeg_path.replace('ffmpeg', 'ffprobe')
-        audio_check = subprocess.run([
-            ffprobe_path, '-i', sourceVideo, '-show_streams', '-select_streams', 'a'
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ffprobe_path = ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe')
+        audio_check = subprocess.run([ffprobe_path, '-i', sourceVideo, '-show_streams', '-select_streams', 'a'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
         if audio_check.returncode == 0:
             tqdm.write("\nTransferring audio...", file=sys.stdout)
@@ -312,7 +351,7 @@ def finalize_video_with_ffmpeg(input_video, output_video, target_fps, original_w
         temp_output = os.path.join(work_dir, os.path.basename(output_video))
 
         try:
-            ffprobe_path = ffmpeg_path.replace('ffmpeg', 'ffprobe')
+            ffprobe_path = ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe')
             dur_str = subprocess.check_output([
                 ffprobe_path, '-v', 'error', '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1', input_video
@@ -326,7 +365,8 @@ def finalize_video_with_ffmpeg(input_video, output_video, target_fps, original_w
         enc_args =['-c:v', 'libx264', '-preset', 'medium', '-profile:v', 'high', '-pix_fmt', 'yuv420p']
         try:
             enc_list = subprocess.run([ffmpeg_path, '-hide_banner', '-encoders'],
-                                    capture_output=True, text=True, timeout=10)
+                capture_output=True, text=True, timeout=10
+            )
             if 'h264_nvenc' in enc_list.stdout and original_w <= 4096 and original_h <= 4096:
                 tqdm.write("\nUsing h264_nvenc hardware encoder.", file=sys.stdout)
                 enc_args =['-c:v', 'h264_nvenc', '-preset', 'p7', '-tune', 'hq',
@@ -356,10 +396,12 @@ def finalize_video_with_ffmpeg(input_video, output_video, target_fps, original_w
 
         process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
         g_current_subprocess = process
-        
+
         for line in process.stderr:
-            if exit_program: break
+            if exit_program:
+                break
             tqdm.write(f"  FFmpeg: {line.strip()}", file=sys.stdout)
+        
         process.wait()
 
         if process.returncode != 0:
@@ -382,19 +424,22 @@ def finalize_video_with_ffmpeg(input_video, output_video, target_fps, original_w
             shutil.rmtree(work_dir, ignore_errors=True)
 
 def check_for_keypress():
-    """Linux-compatible keypress detection using select"""
+    """
+    Windows-compatible (and Wine-compatible) keypress detection using msvcrt.
+    '/'        → skip current video
+    '?' (Shift+/) → exit program
+    Falls back to a no-op sleep loop if msvcrt is unavailable.
+    """
     global processing_interrupted, exit_program, g_current_subprocess
-    import select
-    import termios
-    import tty
 
     try:
-        old_settings = termios.tcgetattr(sys.stdin)
-        tty.setraw(sys.stdin.fileno())
+        import msvcrt
+
+        print("[Press '/' to skip current video | Press 'Shift+/' (?) to exit]", flush=True)
 
         while not exit_program:
-            if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [],[]):
-                char = sys.stdin.read(1)
+            if msvcrt.kbhit():
+                char = msvcrt.getwch()
                 if char == '/':
                     print("\n'/' pressed. Skipping current video...", flush=True)
                     processing_interrupted = True
@@ -402,31 +447,23 @@ def check_for_keypress():
                     print("\n'Shift+/' pressed. Exiting...", flush=True)
                     exit_program = True
                     processing_interrupted = True
-                    # Terminate any active FFmpeg subprocess
-                    if g_current_subprocess and g_current_subprocess.poll() is None:
-                        try:
-                            g_current_subprocess.terminate()
-                            g_current_subprocess.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            g_current_subprocess.kill()
-                        except Exception:
-                            g_current_subprocess.kill()
+                    cleanup_processes()
                     break
             time.sleep(0.1)
-    except Exception:
-        # Fallback for environments where tty manipulation is not possible
+
+    except ImportError:
+        # msvcrt not available — run without interactive key controls
+        print("[Interactive key controls unavailable in this environment]", flush=True)
         while not exit_program:
             time.sleep(1)
-    finally:
-        try:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-        except Exception:
-            pass
+    except Exception:
+        while not exit_program:
+            time.sleep(1)
+
 
 @torch.inference_mode()
 def process_frame(model, I0, I1, ratio, scale, h, w, original_h, original_w, device, fp16):
     try:
-        # Validate input tensors
         if torch.isnan(I0).any() or torch.isnan(I1).any():
             tqdm.write("Warning: NaN detected in input frames, using fallback", file=sys.stdout)
             mid = I0 if ratio < 0.5 else I1
@@ -485,15 +522,20 @@ def check_memory_safety():
     return mem.available > 2 * 1024**3
 
 def validate_frame(frame, expected_shape=None):
-    if frame is None or frame.size == 0 or len(frame.shape) != 3: return False
-    if expected_shape and frame.shape != expected_shape: return False
-    if np.any(np.isnan(frame)) or np.any(np.isinf(frame)): return False
-    if frame.dtype != np.uint8: return False
+    if frame is None or frame.size == 0 or len(frame.shape) != 3:
+        return False
+    if expected_shape and frame.shape != expected_shape:
+        return False
+    if np.any(np.isnan(frame)) or np.any(np.isinf(frame)):
+        return False
+    if frame.dtype != np.uint8:
+        return False
     return True
 
 def get_actual_frame_count(video_path):
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened(): return 0
+    if not cap.isOpened():
+        return 0
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if frame_count > 0:
@@ -503,7 +545,8 @@ def get_actual_frame_count(video_path):
     actual_count = 0
     while True:
         ret, _ = cap.read()
-        if not ret: break
+        if not ret:
+            break
         actual_count += 1
     cap.release()
     return actual_count
@@ -523,7 +566,6 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
     output_filepath = os.path.join(specific_output_dir, f"{video_filename}.{ext}")
 
     if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 1024:
-        # Don't log every skip to avoid spam, just return
         return None
 
     start_time = time.time()
@@ -575,12 +617,10 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         interpolation_method = cv2.INTER_AREA if (new_w < original_w or new_h < original_h) else cv2.INTER_LINEAR
 
         tqdm.write(f"\nProcessing video: {video_path}", file=sys.stdout)
-        tqdm.write("  [Press '/' to skip this video | Press 'Shift+/' (?) to exit]", file=sys.stdout)
         tqdm.write(f"  Original: {original_w}x{original_h} @ {original_fps:.2f} FPS ({int(tot_frame)} frames, {duration:.2f}s)", file=sys.stdout)
         tqdm.write(f"  Processing at: {new_w}x{new_h}", file=sys.stdout)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # inference_mode decorator on process_frame replaces set_grad_enabled
         
         # --- SAFETY CHECK ---
         if fp16 and not torch.cuda.is_available():
@@ -606,7 +646,7 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
 
         source_frame_time = 1.0 / original_fps
         target_frame_count = math.ceil(duration * target_fps)
-        source_timestamps = [i * source_frame_time for i in range(int(tot_frame))]
+        source_timestamps =[i * source_frame_time for i in range(int(tot_frame))]
         target_timestamps = np.linspace(0, duration, num=target_frame_count, endpoint=False).tolist()
 
         frame_mapping =[]
@@ -646,8 +686,6 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         write_buffer = Queue(maxsize=MAX_BUFFER_SIZE)
         frame_cache = {0: lastframe}
 
-        # RIFE HD requires 32-pixel alignment; 64 gives a safe margin and
-        # is much smaller than the original 256, reducing tensor size.
         padding_tmp = max(64, int(64/scale))
         ph = ((h-1)//padding_tmp+1)*padding_tmp
         pw = ((w-1)//padding_tmp+1)*padding_tmp
@@ -657,7 +695,8 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         def process_batch_sync(batch_mappings, frame_cache):
             results =[]
             for idx, mapping in enumerate(batch_mappings):
-                if exit_program: break
+                if exit_program:
+                    break
                 i1, i2, r = mapping
                 if i1 == i2 or r == 0:
                     if i1 in frame_cache:
@@ -674,7 +713,8 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
                         I1 = torch.from_numpy(frame2_rgb.transpose(2,0,1)).to(device).unsqueeze(0).float()/255.
                         I0 = F.pad(I0, padding)
                         I1 = F.pad(I1, padding)
-                        if fp16: I0, I1 = I0.half(), I1.half()
+                        if fp16:
+                            I0, I1 = I0.half(), I1.half()
 
                         frm = process_frame(model, I0, I1, r, scale, h, w, original_h, original_w, device, fp16)
                         if frm is not None:
@@ -685,7 +725,7 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
                             results.append((idx, fallback_resized))
                     except Exception as e:
                         if not exit_program:
-                           tqdm.write(f"Error processing frame pair ({i1}, {i2}): {str(e)}", file=sys.stdout)
+                            tqdm.write(f"Error processing frame pair ({i1}, {i2}): {str(e)}", file=sys.stdout)
                         fallback_frame = frame_cache[i1] if r < 0.5 else frame_cache[i2]
                         fallback_resized = cv2.resize(fallback_frame, (original_w, original_h), interpolation=cv2.INTER_LANCZOS4)
                         results.append((idx, fallback_resized))
@@ -696,7 +736,8 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
             while not exit_program:
                 try:
                     item = write_buffer.get(timeout=0.5)
-                    if item is None: break
+                    if item is None:
+                        break
                     if png:
                         cv2.imwrite(os.path.join(png_dir, f'{cnt:07d}.png'), cv2.cvtColor(item, cv2.COLOR_BGR2RGB))
                         cnt += 1
@@ -705,7 +746,10 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
                 except Empty:
                     continue
 
-        write_thread = threading.Thread(target=clear_write_buffer, args=(write_buffer, os.path.join(specific_output_dir, video_filename) if png else None))
+        write_thread = threading.Thread(
+            target=clear_write_buffer,
+            args=(write_buffer, os.path.join(specific_output_dir, video_filename) if png else None)
+        )
         write_thread.daemon = True
         write_thread.start()
 
@@ -716,14 +760,16 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
         video_ended = False
 
         for batch_start in range(0, len(frame_mapping), 8):
-            if exit_program or processing_interrupted: break
+            if exit_program or processing_interrupted:
+                break
 
             batch_end = min(batch_start + 8, len(frame_mapping))
             batch = frame_mapping[batch_start:batch_end]
 
             highest_needed = max(max(i1, i2) for i1, i2, _ in batch)
             while frame_cursor <= highest_needed and not video_ended:
-                if exit_program or processing_interrupted: break
+                if exit_program or processing_interrupted:
+                    break
                 ret, frame = cap.read()
                 if not ret:
                     video_ended = True
@@ -749,12 +795,12 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
 
             needed_keys = set(i for m in frame_mapping[batch_end:batch_end+CACHE_LIMIT] for i in m[:2])
             keys_to_del =[k for k in frame_cache if k not in needed_keys and k < frame_cursor - (CACHE_LIMIT // 2)]
-            for k in keys_to_del: del frame_cache[k]
+            for k in keys_to_del:
+                del frame_cache[k]
 
         gen_pbar.close()
         cap.release()
 
-        # Drain the queue first if we're exiting, so the sentinel can always get in
         if exit_program or processing_interrupted:
             while not write_buffer.empty():
                 try:
@@ -765,13 +811,17 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
 
         while write_thread.is_alive():
             write_thread.join(timeout=0.5)
-        
-        if vid_out: vid_out.release()
+
+        if vid_out:
+            vid_out.release()
 
         if exit_program or processing_interrupted:
-            if os.path.exists(current_output_file): os.remove(current_output_file)
+            if current_output_file and os.path.exists(current_output_file):
+                try:
+                    os.remove(current_output_file)
+                except Exception:
+                    pass
             print(f"\nProcessing of {video_path} was interrupted.", flush=True)
-            # Reset interruption flag for the next file unless exiting program
             if not exit_program:
                 processing_interrupted = False
             return False
@@ -781,7 +831,7 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
                                       original_w, original_h, duration, display_aspect_ratio, sample_aspect_ratio)
             if not exit_program:
                 transferAudio(video_path, output_filepath)
-        
+
         tqdm.write(f"  -> Finished in {time.time()-start_time:.2f} seconds.", file=sys.stdout)
         return True
 
@@ -790,10 +840,26 @@ def process_video(video_path, output_dir, target_fps, modelDir='train_log', fp16
             tqdm.write(f"Error processing {video_path}: {e}", file=sys.stdout)
         return False
     finally:
-        if 'cap' in locals() and cap.isOpened(): cap.release()
+        # Guarantee that file handles are dropped before returning
+        if 'vid_out' in locals() and vid_out is not None:
+            try:
+                vid_out.release()
+            except Exception:
+                pass
+        if 'cap' in locals() and cap is not None and cap.isOpened():
+            try:
+                cap.release()
+            except Exception:
+                pass
+        
+        cleanup_processes()
+        
         if is_tmp and os.path.exists(inp):
-            try: os.remove(inp)
-            except PermissionError: pass
+            try:
+                os.remove(inp)
+            except PermissionError:
+                pass
+                
         ensure_temp_dir_cleaned()
 
 def find_all_videos(root_dir, output_dir):
@@ -801,24 +867,23 @@ def find_all_videos(root_dir, output_dir):
     video_files =[]
     abs_out = os.path.abspath(output_dir)
     for d, dirs, files in os.walk(root_dir):
-        if os.path.abspath(d).startswith(abs_out): continue
-        # Skip Python virtual environment directories (identified by pyvenv.cfg)
+        if os.path.abspath(d).startswith(abs_out):
+            continue
+        # Skip Python virtual environment directories
         dirs[:] =[sub for sub in dirs
                    if not os.path.exists(os.path.join(d, sub, 'pyvenv.cfg'))]
         for f in files:
             if os.path.splitext(f)[1].lower() in video_extensions:
                 video_files.append(os.path.join(d, f))
-    # Sort to ensure consistent order across runs
     return sorted(video_files)
 
 def process_videos_sequential(video_files, args):
     global processing_interrupted, exit_program
-    
-    # First pass: quickly count what needs to be done
+
     print(f"\nQuick scan of {len(video_files)} videos...")
     to_process =[]
     already_done = 0
-    
+
     for vp in video_files:
         base_input_dir = os.path.abspath(args.input_dir if args.input_dir else os.getcwd())
         abs_video_path = os.path.abspath(vp)
@@ -829,25 +894,26 @@ def process_videos_sequential(video_files, args):
         specific_output_dir = os.path.join(args.output, rel_path)
         video_filename = os.path.basename(os.path.splitext(vp)[0])
         output_filepath = os.path.join(specific_output_dir, f"{video_filename}.{args.ext}")
-        
+
         if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 1024:
             already_done += 1
         else:
             to_process.append(vp)
-    
-    print(f"  ✓ Already processed: {already_done} files")
-    print(f"  → Need to process: {len(to_process)} files")
+
+    print(f"  Already processed: {already_done} files")
+    print(f"  Need to process:   {len(to_process)} files")
     print()
-    
+
     if not to_process:
         print("All files already processed!")
         return
-    
+
     overall_pbar = tqdm(total=len(to_process), desc="Overall Progress", position=0, leave=True)
     summary = {'Processed': 0, 'Skipped': 0, 'Failed': 0}
 
     for i, vp in enumerate(to_process):
-        if exit_program: break
+        if exit_program:
+            break
 
         overall_pbar.set_description(f"Processing: {os.path.basename(vp)}")
         result = process_video(
@@ -855,11 +921,11 @@ def process_videos_sequential(video_files, args):
             modelDir=args.modelDir, fp16=args.fp16, scale=args.scale, ext=args.ext,
             png=args.png, auto_scale=not args.disable_auto_scale)
 
-        if result is True: 
+        if result is True:
             summary['Processed'] += 1
-        elif result is None: 
+        elif result is None:
             summary['Skipped'] += 1
-        else: 
+        else:
             summary['Failed'] += 1
 
         overall_pbar.update(1)
@@ -870,21 +936,25 @@ def process_videos_sequential(video_files, args):
     if not exit_program:
         tqdm.write("\n" + "="*60, file=sys.stdout)
         tqdm.write("PROCESSING COMPLETE!", file=sys.stdout)
-        tqdm.write(f"  Total videos found: {len(video_files)}", file=sys.stdout)
-        tqdm.write(f"  Already done (skipped): {already_done}", file=sys.stdout)
-        tqdm.write(f"  Successfully processed this run: {summary['Processed']}", file=sys.stdout)
-        tqdm.write(f"  Skipped (matching FPS): {summary['Skipped']}", file=sys.stdout)
-        tqdm.write(f"  Failed: {summary['Failed']}", file=sys.stdout)
+        tqdm.write(f"  Total videos found:           {len(video_files)}", file=sys.stdout)
+        tqdm.write(f"  Already done (skipped):       {already_done}", file=sys.stdout)
+        tqdm.write(f"  Successfully processed:       {summary['Processed']}", file=sys.stdout)
+        tqdm.write(f"  Skipped (matching FPS):       {summary['Skipped']}", file=sys.stdout)
+        tqdm.write(f"  Failed:                       {summary['Failed']}", file=sys.stdout)
         tqdm.write("="*60, file=sys.stdout)
 
 def main():
     global exit_program, args
 
+    # Hook the Ctrl+C signal to our custom handler to avoid instant crash
+    signal.signal(signal.SIGINT, handle_interrupt)
+
     if not check_system_requirements():
         print("\nPlease install missing requirements and try again.")
+        input("Press Enter to exit...")
         return 1
 
-    parser = argparse.ArgumentParser(description="RIFE Video Frame Interpolation (Linux Optimized)")
+    parser = argparse.ArgumentParser(description="RIFE Video Frame Interpolation (Windows)")
     parser.add_argument('--output', type=str, default='fpsConv', help='Output directory')
     parser.add_argument('--model', dest='modelDir', type=str, default='train_log', help='RIFE model directory')
     parser.add_argument('--fp16', action='store_true', help='Use half precision')
@@ -899,43 +969,52 @@ def main():
     model_path = Path(args.modelDir)
     if not model_path.exists() or not any(model_path.glob("RIFE_HD*.py")):
         print(f"Error: RIFE model files not found in '{args.modelDir}'")
+        input("Press Enter to exit...")
         return 1
 
     input_dir = args.input_dir if args.input_dir else os.getcwd()
     if not os.path.exists(input_dir):
         print(f"Error: Input directory '{input_dir}' does not exist")
+        input("Press Enter to exit...")
         return 1
 
     os.makedirs(args.output, exist_ok=True)
 
-    print(f"RIFE Video Processing (Linux)")
-    print(f"Input directory: {input_dir}")
+    print(f"RIFE Video Processing (Windows)")
+    print(f"Input directory:  {input_dir}")
     print(f"Output directory: {args.output}")
-    print(f"Target FPS: {args.target_fps}")
+    print(f"Target FPS:       {args.target_fps}")
     print(f"Using {'GPU' if torch.cuda.is_available() else 'CPU'}")
-    print(f"FP16 mode: {'Enabled' if args.fp16 else 'Disabled'}")
-
+    print(f"FP16 mode:        {'Enabled' if args.fp16 else 'Disabled'}")
 
     keyboard_thread = threading.Thread(target=check_for_keypress, daemon=True)
     keyboard_thread.start()
-        
+
     try:
         video_files = find_all_videos(input_dir, args.output)
         if not video_files:
             print("No video files found in input directory")
+            input("Press Enter to exit...")
             return 0
 
         print(f"\nFound {len(video_files)} video files to process")
         process_videos_sequential(video_files, args)
 
+    except KeyboardInterrupt:
+        # Handled by our signal hook, but good to catch here just in case
+        print("\nProcess interrupted by user.")
     except Exception as e:
         print(f"An unexpected error occurred in main: {e}")
     finally:
         exit_program = True
         print("\nFinal cleanup...")
+        cleanup_processes()
         ensure_temp_dir_cleaned()
 
     return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
+    # Hard exit prevents Wine/CUDA driver segfaults during PyTorch teardown
+    import os
+    os._exit(0)

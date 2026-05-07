@@ -42,8 +42,9 @@ if [ ! -d "$VENV_DIR" ]; then
     echo ""
 fi
 
-# Activate the virtual environment
+# Activate the virtual environment (must happen before anything else runs)
 source "$VENV_DIR/bin/activate"
+PYTHON_BIN="$VENV_DIR/bin/python"
 
 # --- Default Parameters ---
 SCALE="1"
@@ -103,7 +104,7 @@ echo ""
 
 # Change to the script's directory and run
 cd "$SCRIPT_DIR"
-python3 "$SCRIPT_PATH" --scale $SCALE --target-fps $TARGET_FPS $FP16 $INPUT_DIR_ARG --output "$OUTPUT_DIR" $MODEL_DIR_ARG
+"$PYTHON_BIN" "$SCRIPT_PATH" --scale $SCALE --target-fps $TARGET_FPS $FP16 $INPUT_DIR_ARG --output "$OUTPUT_DIR" $MODEL_DIR_ARG
 
 echo ""
 stty sane 2>/dev/null
