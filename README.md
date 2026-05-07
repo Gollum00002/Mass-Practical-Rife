@@ -79,13 +79,6 @@ Open `Launch.sh` (Linux) or `Launch.bat` (Windows) and set the following paramet
 
 CD into the MPR folder, then:
 
-**Linux — Fish shell (recommended):**
-```fish
-bash Launch.sh
-```
-
-> Note: Fish does not run shell scripts directly, so `bash` must be called explicitly.
-
 **Linux — Bash:**
 ```bash
 ./Launch.sh
